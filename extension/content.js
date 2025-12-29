@@ -1,20 +1,84 @@
 // Content script - выполняется на каждой странице
 // Задача: найти CMP систему, инъецировать cookie отказа, спрятать баннеры
 
+// ============================================================================
+// DEBUG LOGGING & PAGE STATS
+// ============================================================================
+
+const DEBUG_LOG_LIMIT = 50; // Храним последние 50 логов
+let pageStats = {
+  url: window.location.href,
+  cmpDetected: null,
+  elementsHidden: 0,
+  cookiesInjected: [],
+  status: 'initializing',
+  timestamp: Date.now()
+};
+
+// Debug логирование с сохранением в storage
+async function debugLog(type, message) {
+  const logEntry = {
+    time: Date.now(),
+    type: type, // 'info' | 'detection' | 'injection' | 'hide' | 'error'
+    msg: message,
+    url: window.location.href
+  };
+
+  console.log(`Ghost Rejector: ${message}`);
+
+  try {
+    const result = await chrome.storage.local.get(['debugLogs']);
+    let logs = result.debugLogs || [];
+    logs.push(logEntry);
+
+    // Ограничиваем размер
+    if (logs.length > DEBUG_LOG_LIMIT) {
+      logs = logs.slice(-DEBUG_LOG_LIMIT);
+    }
+
+    await chrome.storage.local.set({ debugLogs: logs });
+  } catch (error) {
+    console.warn('Ghost Rejector: Не удалось сохранить лог:', error);
+  }
+}
+
+// Сохранение статистики текущей страницы
+async function savePageStats() {
+  try {
+    await chrome.storage.local.set({
+      currentPageStats: pageStats
+    });
+  } catch (error) {
+    console.warn('Ghost Rejector: Не удалось сохранить статистику:', error);
+  }
+}
+
 (async function() {
   'use strict';
 
-  console.log('Ghost Rejector: Content script запущен на', window.location.href);
+  await debugLog('info', `Content script запущен на ${window.location.href}`);
 
   // Загружаем сигнатуры CMP систем
   const result = await loadSignatures();
   if (!result || !result.signatures) {
-    console.error('Ghost Rejector: Не удалось загрузить сигнатуры');
+    await debugLog('error', 'Не удалось загрузить сигнатуры');
+    pageStats.status = 'error';
+    await savePageStats();
     return;
   }
 
   const { signatures, source, version } = result;
-  console.log(`Ghost Rejector: Загружено ${signatures.length} сигнатур из источника: ${source} (версия: ${version})`);
+  await debugLog('info', `Загружено ${signatures.length} сигнатур из источника: ${source} (версия: ${version})`);
+
+  // Сохраняем глобальную статистику
+  await chrome.storage.local.set({
+    globalStats: {
+      signaturesCount: signatures.length,
+      signaturesVersion: version,
+      signaturesSource: source,
+      lastUpdate: Date.now()
+    }
+  });
 
   // Ждем готовности DOM для надежной работы с cookies
   await waitForDOMReady();
@@ -26,22 +90,22 @@
   hideAllBanners(signatures);
 
   // Пытаемся детектировать CMP
-  detectAndInject(signatures);
+  await detectAndInject(signatures);
 
   // Повторные проверки для асинхронно загружаемых CMP
   const timers = [];
-  timers.push(setTimeout(() => {
-    detectAndInject(signatures);
+  timers.push(setTimeout(async () => {
+    await detectAndInject(signatures);
     hideAllBanners(signatures);
   }, 500));
 
-  timers.push(setTimeout(() => {
-    detectAndInject(signatures);
+  timers.push(setTimeout(async () => {
+    await detectAndInject(signatures);
     hideAllBanners(signatures);
   }, 1000));
 
-  timers.push(setTimeout(() => {
-    detectAndInject(signatures);
+  timers.push(setTimeout(async () => {
+    await detectAndInject(signatures);
     hideAllBanners(signatures);
   }, 2000));
 
@@ -335,46 +399,45 @@ function hideAllBanners(signatures) {
 }
 
 // Определение и инъекция для найденной CMP
-function detectAndInject(signatures) {
+async function detectAndInject(signatures) {
+  let foundCMP = false;
+
   for (const cmp of signatures) {
     if (isCMPPresent(cmp)) {
-      console.log(`Ghost Rejector: Обнаружена CMP "${cmp.name}"`);
+      foundCMP = true;
+      await debugLog('detection', `Обнаружена CMP "${cmp.name}"`);
 
-      // Отправляем сообщение в background
-      try {
-        chrome.runtime.sendMessage({
-          type: 'cmpDetected',
-          cmpName: cmp.name
-        });
-      } catch (e) {
-        // Игнорируем ошибки отправки сообщений
-      }
+      // Обновляем pageStats
+      pageStats.cmpDetected = cmp.name;
+      pageStats.status = 'working';
 
       // Инъецируем cookie
       if (injectCookie(cmp.cookie)) {
-        console.log(`Ghost Rejector: Cookie "${cmp.cookie.name}" установлен`);
+        await debugLog('injection', `Cookie "${cmp.cookie.name}" установлен`);
 
-        try {
-          chrome.runtime.sendMessage({
-            type: 'cookieInjected',
-            cmpName: cmp.name
-          });
-        } catch (e) {
-          // Игнорируем ошибки отправки сообщений
+        if (!pageStats.cookiesInjected.includes(cmp.cookie.name)) {
+          pageStats.cookiesInjected.push(cmp.cookie.name);
         }
 
         // Скрываем баннеры
-        hideBanners(cmp.hideSelectors);
+        const hidden = hideBanners(cmp.hideSelectors);
+        pageStats.elementsHidden += hidden;
 
         // Проверка эффективности через 2 секунды
         setTimeout(() => checkEffectiveness(cmp), 2000);
       } else {
-        console.warn(`Ghost Rejector: Не удалось установить cookie "${cmp.cookie.name}"`);
+        await debugLog('error', `Не удалось установить cookie "${cmp.cookie.name}"`);
       }
-
-      // Продолжаем проверку других CMP (не break!)
     }
   }
+
+  // Если CMP не найдена
+  if (!foundCMP) {
+    pageStats.status = 'no-cmp';
+  }
+
+  // Сохраняем статистику
+  await savePageStats();
 }
 
 // Проверка эффективности инъекции
@@ -471,33 +534,31 @@ function getCookieValue(name) {
 
 // Скрытие баннеров через CSS (оптимизированная версия с batch обработкой)
 function hideBanners(selectors) {
+  let hiddenCount = 0;
+
   try {
     // Оптимизация: объединяем все селекторы в один запрос к DOM
     const combinedSelector = selectors.join(', ');
     const elements = document.querySelectorAll(combinedSelector);
 
+    hiddenCount = elements.length;
+
     if (elements.length > 0) {
-      console.log(`Ghost Rejector: Скрываем ${elements.length} элементов за один проход DOM`);
+      debugLog('hide', `Скрываем ${elements.length} элементов`);
     }
 
     elements.forEach(el => {
-      el.style.setProperty('display', 'none', 'important');
-      el.style.setProperty('visibility', 'hidden', 'important');
-      el.style.setProperty('opacity', '0', 'important');
-      el.style.setProperty('position', 'absolute', 'important');
-      el.style.setProperty('pointer-events', 'none', 'important');
-      el.style.setProperty('width', '0', 'important');
-      el.style.setProperty('height', '0', 'important');
-      el.style.setProperty('overflow', 'hidden', 'important');
-      // Дополнительно удаляем из DOM
+      // Просто удаляем из DOM
       el.remove();
     });
   } catch (error) {
-    console.warn('Ghost Rejector: Ошибка скрытия баннера:', error);
+    debugLog('error', `Ошибка скрытия баннера: ${error.message}`);
   }
 
   // Убираем overlay если есть
   removeBodyOverflow();
+
+  return hiddenCount;
 }
 
 // Убираем блокировку скролла с body
