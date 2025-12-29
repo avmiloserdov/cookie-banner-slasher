@@ -1,0 +1,47 @@
+[
+  {
+    "id": "onetrust",
+    "name": "OneTrust",
+    "detectors": [
+      "window.OneTrust",
+      "window.OptanonWrapper",
+      "#onetrust-banner-sdk",
+      "#onetrust-consent-sdk",
+      ".optanon-alert-box-wrapper"
+    ],
+    "cookie": {
+      "name": "OptanonConsent",
+      "value": "isGpcEnabled=0\u0026datestamp=Mon+Dec+29+2025+15:57:18+GMT+0300+(MSK)\u0026version=202501.1.0\u0026browserGpcFlag=0\u0026isIABGlobal=false\u0026hosts=\u0026consentId=ghost-rejector-1767013038\u0026interactionCount=1\u0026landingPath=NotLandingPage\u0026groups=1:1,2:0,3:0,4:0"
+    },
+    "hideSelectors": [
+      "#onetrust-banner-sdk",
+      "#onetrust-consent-sdk",
+      ".onetrust-pc-dark-filter",
+      "#onetrust-pc-sdk",
+      ".optanon-alert-box-wrapper",
+      ".optanon-alert-box-bg",
+      "div[class*='onetrust']",
+      "div[id*='onetrust']",
+      ".ot-sdk-container",
+      ".ot-sdk-row"
+    ]
+  },
+  {
+    "id": "cookiebot",
+    "name": "Cookiebot",
+    "detectors": [
+      "window.Cookiebot",
+      "#CybotCookiebotDialog",
+      "#CookiebotWidget"
+    ],
+    "cookie": {
+      "name": "CookieConsent",
+      "value": "{stamp:'ghost-rejector',necessary:true,preferences:false,statistics:false,marketing:false,method:'explicit',ver:1,utc:1767013038350,region:'eu'}"
+    },
+    "hideSelectors": [
+      "#CybotCookiebotDialog",
+      "#CookiebotWidget",
+      ".CybotCookiebotDialogBodyButton"
+    ]
+  }
+]

@@ -4,7 +4,6 @@ builder/builder.exe
 
 # Generated files
 extension/rules/net_rules.json
-extension/rules/signatures.json
 
 # OS
 .DS_Store

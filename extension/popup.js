@@ -12,12 +12,12 @@ async function loadData() {
     const result = await chrome.storage.local.get([
       'currentPageStats',
       'globalStats',
-      'debugLogs'
+      'currentPageLogs'
     ]);
 
     updateCurrentPage(result.currentPageStats);
     updateGlobalStats(result.globalStats);
-    updateDebugLogs(result.debugLogs, false); // Показываем последние 10
+    updateDebugLogs(result.currentPageLogs, false); // Показываем последние 10
   } catch (error) {
     console.error('Failed to load data:', error);
   }
@@ -144,8 +144,8 @@ function setupDebugToggle() {
       debugChevron.classList.add('expanded');
 
       // Загружаем все 50 логов при раскрытии
-      const result = await chrome.storage.local.get(['debugLogs']);
-      updateDebugLogs(result.debugLogs, true);
+      const result = await chrome.storage.local.get(['currentPageLogs']);
+      updateDebugLogs(result.currentPageLogs, true);
     } else {
       debugContent.classList.remove('expanded');
       debugChevron.classList.remove('expanded');
@@ -184,12 +184,12 @@ async function generateDebugReport() {
   const result = await chrome.storage.local.get([
     'currentPageStats',
     'globalStats',
-    'debugLogs'
+    'currentPageLogs'
   ]);
 
   const pageStats = result.currentPageStats || {};
   const globalStats = result.globalStats || {};
-  const logs = result.debugLogs || [];
+  const logs = result.currentPageLogs || [];
 
   const manifest = chrome.runtime.getManifest();
 

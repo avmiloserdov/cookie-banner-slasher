@@ -5,7 +5,7 @@
 // DEBUG LOGGING & PAGE STATS
 // ============================================================================
 
-const DEBUG_LOG_LIMIT = 50; // Храним последние 50 логов
+const DEBUG_LOG_LIMIT = 50; // Храним последние 50 логов per-tab
 let pageStats = {
   url: window.location.href,
   cmpDetected: null,
@@ -15,7 +15,8 @@ let pageStats = {
   timestamp: Date.now()
 };
 
-// Debug логирование с сохранением в storage
+// Debug логирование с сохранением в storage (per-tab)
+// Не выводим в консоль, чтобы сайт не мог обнаружить расширение
 async function debugLog(type, message) {
   const logEntry = {
     time: Date.now(),
@@ -24,11 +25,17 @@ async function debugLog(type, message) {
     url: window.location.href
   };
 
-  console.log(`Ghost Rejector: ${message}`);
-
   try {
-    const result = await chrome.storage.local.get(['debugLogs']);
-    let logs = result.debugLogs || [];
+    // Логи хранятся только для текущей страницы
+    // При обновлении/переходе на другую страницу логи сбрасываются
+    const result = await chrome.storage.local.get(['currentPageLogs']);
+    let logs = result.currentPageLogs || [];
+
+    // При новой загрузке страницы (первый лог) - сбрасываем старые
+    if (logs.length > 0 && logs[0].url !== window.location.href) {
+      logs = [];
+    }
+
     logs.push(logEntry);
 
     // Ограничиваем размер
@@ -36,9 +43,9 @@ async function debugLog(type, message) {
       logs = logs.slice(-DEBUG_LOG_LIMIT);
     }
 
-    await chrome.storage.local.set({ debugLogs: logs });
+    await chrome.storage.local.set({ currentPageLogs: logs });
   } catch (error) {
-    console.warn('Ghost Rejector: Не удалось сохранить лог:', error);
+    // Тихо игнорируем ошибки сохранения
   }
 }
 
@@ -49,12 +56,15 @@ async function savePageStats() {
       currentPageStats: pageStats
     });
   } catch (error) {
-    console.warn('Ghost Rejector: Не удалось сохранить статистику:', error);
+    await debugLog('error', `Не удалось сохранить статистику: ${error.message}`);
   }
 }
 
 (async function() {
   'use strict';
+
+  // ПРЕВЕНТИВНАЯ БЛОКИРОВКА: скрываем баннеры ДО загрузки CMP через CSS
+  injectPreventiveCSS();
 
   await debugLog('info', `Content script запущен на ${window.location.href}`);
 
@@ -152,6 +162,82 @@ function waitForDOMReady() {
 
 
 // ============================================================================
+// ПРЕВЕНТИВНАЯ CSS БЛОКИРОВКА
+// ============================================================================
+
+// Инжектим CSS правила для скрытия известных баннеров ДО их появления
+function injectPreventiveCSS() {
+  const style = document.createElement('style');
+  style.id = 'ghost-rejector-preventive-css';
+  style.textContent = `
+    /* OneTrust */
+    #onetrust-banner-sdk,
+    #onetrust-consent-sdk,
+    #onetrust-pc-sdk,
+    .onetrust-pc-dark-filter,
+    .optanon-alert-box-wrapper,
+    .optanon-alert-box-bg,
+    div[class*="onetrust"],
+    div[id*="onetrust"],
+    .ot-sdk-container,
+    .ot-sdk-row,
+
+    /* Cookiebot */
+    #CybotCookiebotDialog,
+    #CookiebotWidget,
+    .CybotCookiebotDialogBodyButton,
+
+    /* Usercentrics */
+    #usercentrics-root,
+    #uc-banner-modal,
+    .uc-embedding,
+
+    /* Consentmanager */
+    #cmpbox,
+    #cmpbox2,
+    .cmp-dialog,
+
+    /* Quantcast */
+    #qc-cmp2-ui,
+    .qc-cmp2-container,
+
+    /* TrustArc */
+    #consent_blackbar,
+    #teconsent,
+    .truste_box_overlay,
+
+    /* Didomi */
+    #didomi-host,
+    .didomi-popup-container,
+
+    /* Termly */
+    #termly-code-snippet-support,
+    .termly-styles-module,
+
+    /* Generic */
+    [class*="cookie-banner"],
+    [class*="cookie-consent"],
+    [class*="cookie-notice"],
+    [id*="cookie-banner"],
+    [id*="cookie-consent"],
+    [id*="gdpr"] {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+      position: absolute !important;
+      width: 0 !important;
+      height: 0 !important;
+      overflow: hidden !important;
+    }
+  `;
+
+  // Инжектим в head как можно раньше
+  (document.head || document.documentElement).appendChild(style);
+}
+
+
+// ============================================================================
 // АВТООБНОВЛЕНИЕ СИГНАТУР ИЗ GITHUB
 // ============================================================================
 
@@ -182,7 +268,7 @@ async function loadSignatures() {
     // Шаг 1: Проверяем кэш в chrome.storage
     const cached = await getCachedSignatures();
     if (cached && isCacheValid(cached.timestamp)) {
-      console.log(`Ghost Rejector: Используем кэшированные сигнатуры (${cached.signatures.length} шт, версия: ${cached.version})`);
+      // Используем кэш без логирования (уже закэшировано ранее)
       return {
         signatures: cached.signatures,
         source: 'cache',
@@ -191,7 +277,6 @@ async function loadSignatures() {
     }
 
     // Шаг 2: Загружаем из GitHub (primary source)
-    console.log('Ghost Rejector: Загружаем свежие сигнатуры из GitHub...');
     const githubResult = await fetchSignaturesFromGitHub();
     if (githubResult) {
       // Кэшируем на будущее
@@ -200,7 +285,6 @@ async function loadSignatures() {
     }
 
     // Шаг 3: Fallback на локальный файл
-    console.warn('Ghost Rejector: GitHub недоступен, пытаемся загрузить локальный файл');
     const localResult = await fetchSignaturesFromLocal();
     if (localResult) {
       return localResult;
@@ -210,7 +294,7 @@ async function loadSignatures() {
     throw new Error('Все источники недоступны');
 
   } catch (error) {
-    console.warn('Ghost Rejector: ⚠️ Используем встроенные сигнатуры:', error.message);
+    await debugLog('info', 'Используем встроенные сигнатуры');
     return {
       signatures: getBuiltInSignatures(),
       source: 'builtin',
@@ -237,7 +321,7 @@ async function getCachedSignatures() {
     }
     return null;
   } catch (error) {
-    console.warn('Ghost Rejector: Ошибка чтения кэша:', error);
+    await debugLog('error', `Ошибка чтения кэша: ${error.message}`);
     return null;
   }
 }
@@ -273,14 +357,14 @@ async function fetchSignaturesFromGitHub() {
       throw new Error('Невалидный формат данных');
     }
 
-    console.log(`Ghost Rejector: ✓ Загружено ${data.length} сигнатур из GitHub`);
+    await debugLog('info', `✓ Загружено ${data.length} сигнатур из GitHub`);
     return {
       signatures: data,
       source: 'github',
       version: new Date().toISOString().split('T')[0] // YYYY-MM-DD
     };
   } catch (error) {
-    console.warn('Ghost Rejector: Не удалось загрузить из GitHub:', error.message);
+    await debugLog('info', `GitHub недоступен (${error.message}), используем fallback`);
     return null;
   }
 }
@@ -305,7 +389,7 @@ async function fetchSignaturesFromLocal() {
       version: 'bundled'
     };
   } catch (error) {
-    console.warn('Ghost Rejector: Не удалось загрузить локальный файл:', error.message);
+    await debugLog('error', `Не удалось загрузить локальный файл: ${error.message}`);
     return null;
   }
 }
@@ -318,9 +402,9 @@ async function cacheSignatures(signatures, version) {
       [STORAGE_KEY_TIMESTAMP]: Date.now(),
       [STORAGE_KEY_VERSION]: version
     });
-    console.log(`Ghost Rejector: Сигнатуры закэшированы (версия: ${version})`);
+    await debugLog('info', `Сигнатуры закэшированы (версия: ${version})`);
   } catch (error) {
-    console.warn('Ghost Rejector: Не удалось закэшировать:', error);
+    await debugLog('error', `Не удалось закэшировать: ${error.message}`);
   }
 }
 
@@ -385,7 +469,7 @@ function getBuiltInSignatures() {
 
 // Превентивная инъекция всех cookies до загрузки CMP
 function injectAllCookiesPreventively(signatures) {
-  console.log('Ghost Rejector: Превентивная инъекция cookies...');
+  debugLog('info', 'Превентивная инъекция cookies...');
   for (const cmp of signatures) {
     injectCookie(cmp.cookie);
   }
@@ -400,12 +484,18 @@ function hideAllBanners(signatures) {
 
 // Определение и инъекция для найденной CMP
 async function detectAndInject(signatures) {
+  await debugLog('info', `Начинаем детекцию CMP (сигнатур: ${signatures.length})`);
   let foundCMP = false;
 
   for (const cmp of signatures) {
-    if (isCMPPresent(cmp)) {
+    await debugLog('info', `Проверяем CMP: ${cmp.name}`);
+
+    const isPresent = isCMPPresent(cmp);
+    await debugLog('info', `${cmp.name} найдена: ${isPresent ? 'ДА' : 'НЕТ'}`);
+
+    if (isPresent) {
       foundCMP = true;
-      await debugLog('detection', `Обнаружена CMP "${cmp.name}"`);
+      await debugLog('detection', `✓ Обнаружена CMP "${cmp.name}"`);
 
       // Обновляем pageStats
       pageStats.cmpDetected = cmp.name;
@@ -413,7 +503,7 @@ async function detectAndInject(signatures) {
 
       // Инъецируем cookie
       if (injectCookie(cmp.cookie)) {
-        await debugLog('injection', `Cookie "${cmp.cookie.name}" установлен`);
+        await debugLog('injection', `✓ Cookie "${cmp.cookie.name}" установлен`);
 
         if (!pageStats.cookiesInjected.includes(cmp.cookie.name)) {
           pageStats.cookiesInjected.push(cmp.cookie.name);
@@ -421,18 +511,22 @@ async function detectAndInject(signatures) {
 
         // Скрываем баннеры
         const hidden = hideBanners(cmp.hideSelectors);
-        pageStats.elementsHidden += hidden;
+        if (hidden > 0) {
+          await debugLog('hide', `✓ Скрыто элементов: ${hidden}`);
+          pageStats.elementsHidden += hidden;
+        }
 
         // Проверка эффективности через 2 секунды
         setTimeout(() => checkEffectiveness(cmp), 2000);
       } else {
-        await debugLog('error', `Не удалось установить cookie "${cmp.cookie.name}"`);
+        await debugLog('error', `❌ Не удалось установить cookie "${cmp.cookie.name}"`);
       }
     }
   }
 
   // Если CMP не найдена
   if (!foundCMP) {
+    await debugLog('info', '⚠️ CMP не определена на этой странице');
     pageStats.status = 'no-cmp';
   }
 
@@ -441,17 +535,12 @@ async function detectAndInject(signatures) {
 }
 
 // Проверка эффективности инъекции
-function checkEffectiveness(cmp) {
+async function checkEffectiveness(cmp) {
   const stillPresent = isCMPPresent(cmp);
   if (stillPresent) {
-    console.warn(`⚠️ Ghost Rejector: Баннер ${cmp.name} всё ещё виден после инъекции!`);
-    console.warn('Возможные причины:');
-    console.warn('  1. Формат cookie устарел для этой версии CMP');
-    console.warn('  2. Селекторы неправильные или изменились');
-    console.warn('  3. CMP восстанавливает баннер через JavaScript');
-    console.warn('  4. Это другая версия CMP с другим форматом');
+    await debugLog('error', `⚠️ Баннер ${cmp.name} всё ещё виден после инъекции!`);
   } else {
-    console.log(`✓ Ghost Rejector: Баннер ${cmp.name} успешно скрыт и не восстановлен`);
+    await debugLog('info', `✓ Баннер ${cmp.name} успешно скрыт`);
   }
 }
 
@@ -505,17 +594,15 @@ function injectCookie(cookie, retryCount = 0) {
       const isCorrectFormat = actualValue.includes('groups=') || actualValue.includes('stamp:');
 
       if (!isCorrectFormat) {
-        console.warn(`⚠️ Ghost Rejector: Cookie "${cookie.name}" установлен, но формат может быть неправильным!`);
-        console.warn(`Ожидалось: ${cookie.value.substring(0, 50)}...`);
-        console.warn(`Получили: ${actualValue.substring(0, 50)}...`);
+        debugLog('error', `⚠️ Cookie "${cookie.name}" установлен, но формат может быть неправильным`);
       }
     } else if (retryCount >= MAX_RETRIES) {
-      console.warn(`⚠️ Ghost Rejector: Не удалось установить cookie "${cookie.name}" после ${MAX_RETRIES} попыток`);
+      debugLog('error', `⚠️ Не удалось установить cookie "${cookie.name}" после ${MAX_RETRIES} попыток`);
     }
 
     return success;
   } catch (error) {
-    console.error('Ghost Rejector: Ошибка установки cookie:', error);
+    debugLog('error', `Ошибка установки cookie: ${error.message}`);
     if (retryCount < MAX_RETRIES) {
       setTimeout(() => {
         injectCookie(cookie, retryCount + 1);
@@ -604,13 +691,13 @@ function setupMutationObserver(signatures) {
       childList: true,
       subtree: true
     });
-    console.log('Ghost Rejector: MutationObserver активирован (auto-disconnect через 30 сек)');
+    debugLog('info', 'MutationObserver активирован (auto-disconnect через 30 сек)');
 
     // Автоматическое отключение через таймаут
     setTimeout(() => {
       observer.disconnect();
       clearTimeout(debounceTimer);
-      console.log('Ghost Rejector: MutationObserver отключен (таймаут)');
+      debugLog('info', 'MutationObserver отключен (таймаут)');
     }, OBSERVER_TIMEOUT);
 
     return observer;
@@ -631,9 +718,9 @@ function setGlobalPrivacyControl() {
         writable: false,
         configurable: false
       });
-      console.log('Ghost Rejector: navigator.globalPrivacyControl установлен');
+      debugLog('info', 'navigator.globalPrivacyControl установлен');
     }
   } catch (error) {
-    console.warn('Ghost Rejector: Не удалось установить GPC:', error);
+    debugLog('error', `Не удалось установить GPC: ${error.message}`);
   }
 }
