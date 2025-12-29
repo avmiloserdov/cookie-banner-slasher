@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 280px;
+      padding: 16px;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+    }
+
+    h1 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: #202124;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      background: #e8f5e9;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .status-icon {
+      font-size: 24px;
+      margin-right: 8px;
+    }
+
+    .status-text {
+      color: #2e7d32;
+      font-weight: 500;
+    }
+
+    .info {
+      color: #5f6368;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .version {
+      text-align: center;
+      color: #9aa0a6;
+      font-size: 12px;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #e8eaed;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ghost Rejector</h1>
+
+  <div class="status">
+    <div class="status-icon">✅</div>
+    <div class="status-text">Активно</div>
+  </div>
+
+  <div class="info">
+    Трекеры блокируются<br>
+    Cookie баннеры скрываются
+  </div>
+
+  <div class="info">
+    Поддерживаемые CMP:
+    <ul style="margin: 4px 0; padding-left: 20px;">
+      <li>OneTrust</li>
+      <li>Cookiebot</li>
+    </ul>
+  </div>
+
+  <div class="version">
+    v1.0 | Ghost Rejector
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

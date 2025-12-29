@@ -1,0 +1,17 @@
+# Go
+builder/go.mod
+builder/go.sum
+
+# Generated files
+extension/rules/net_rules.json
+extension/rules/signatures.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

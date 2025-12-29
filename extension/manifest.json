@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Ghost Rejector",
+  "version": "1.1",
+  "description": "Блокирует трекеры и автоматически отклоняет cookie баннеры",
+  "incognito": "split",
+
+  "permissions": [
+    "declarativeNetRequest",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_1",
+        "enabled": true,
+        "path": "rules/net_rules.json"
+      }
+    ]
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Ghost Rejector"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["rules/signatures.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
