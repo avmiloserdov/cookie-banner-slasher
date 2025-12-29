@@ -1,6 +1,6 @@
-# Go
-builder/go.mod
-builder/go.sum
+# Go binaries
+builder/builder
+builder/builder.exe
 
 # Generated files
 extension/rules/net_rules.json

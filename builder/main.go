@@ -9,25 +9,25 @@ func main() {
 	fmt.Println("Ghost Rejector Builder")
 	fmt.Println("======================")
 
-	// Шаг 1: Загружаем и парсим EasyPrivacy
-	fmt.Println("\n[1/4] Скачивание EasyPrivacy списка...")
-	rules, err := downloadAndParseEasyPrivacy()
+	// Шаг 1: Загружаем правила из всех активных источников
+	fmt.Println("\n[1/4] Загрузка правил блокировки из источников...")
+	rules, err := fetchFromAllSources()
 	if err != nil {
 		fmt.Printf("Ошибка: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("      Распарсено %d правил блокировки\n", len(rules))
+	fmt.Printf("      ✓ Итого уникальных правил: %d\n", len(rules))
 
 	// Шаг 2: Добавляем правило GPC заголовка
-	fmt.Println("[2/4] Добавление GPC заголовка...")
+	fmt.Println("\n[2/4] Добавление GPC заголовка...")
 	rules = append(rules, createGPCRule())
 
 	// Шаг 3: Генерируем сигнатуры для OneTrust и Cookiebot
-	fmt.Println("[3/4] Генерация сигнатур CMP...")
+	fmt.Println("\n[3/4] Генерация сигнатур CMP...")
 	signatures := generateCMPSignatures()
 
 	// Шаг 4: Сохраняем JSON файлы
-	fmt.Println("[4/4] Сохранение файлов...")
+	fmt.Println("\n[4/4] Сохранение файлов...")
 	if err := saveJSON("../extension/rules/net_rules.json", rules); err != nil {
 		fmt.Printf("Ошибка сохранения правил: %v\n", err)
 		os.Exit(1)
@@ -37,7 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n✓ Создано %d сетевых правил\n", len(rules))
+	fmt.Printf("\n✓ Создано %d сетевых правил (+ 1 GPC)\n", len(rules)-1)
 	fmt.Printf("✓ Создано %d CMP сигнатур\n", len(signatures))
-	fmt.Println("\nГотово! Загрузите расширение из папки ../extension/")
+	fmt.Println("\n🎉 Готово! Правила сохранены в ../extension/rules/")
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -25,12 +26,15 @@ func downloadAndParseEasyPrivacy() ([]DNRRule, error) {
 
 // parseEasyPrivacyRules парсит EasyPrivacy формат в DeclarativeNetRequest правила
 // Ищет только простые правила формата ||domain.com^ (самые эффективные)
+// Использует deduplication для избежания дублей доменов
 func parseEasyPrivacyRules(r io.Reader) []DNRRule {
 	scanner := bufio.NewScanner(r)
 	rules := []DNRRule{}
+	seenDomains := make(map[string]bool) // Deduplication map
 	id := 1
+	skipped := 0
 
-	for scanner.Scan() && len(rules) < maxRules {
+	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
 		// Пропускаем мусор
@@ -39,10 +43,29 @@ func parseEasyPrivacyRules(r io.Reader) []DNRRule {
 		}
 
 		// Обрабатываем только ||domain^ правила
-		if domain := extractDomain(line); domain != "" {
-			rules = append(rules, createBlockRule(id, domain))
-			id++
+		domain := extractDomain(line)
+		if domain == "" {
+			continue
 		}
+
+		// Deduplication: пропускаем если домен уже есть
+		if seenDomains[domain] {
+			skipped++
+			continue
+		}
+
+		// Проверяем лимит
+		if len(rules) >= maxRules {
+			break
+		}
+
+		seenDomains[domain] = true
+		rules = append(rules, createBlockRule(id, domain))
+		id++
+	}
+
+	if skipped > 0 {
+		fmt.Printf("      Пропущено дублей: %d\n", skipped)
 	}
 
 	return rules

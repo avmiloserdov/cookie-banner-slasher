@@ -87,8 +87,142 @@ function waitForDOMReady() {
 }
 
 
-// Загрузка signatures.json с надежным fallback
+// ============================================================================
+// АВТООБНОВЛЕНИЕ СИГНАТУР ИЗ GITHUB
+// ============================================================================
+
+// Конфигурация источников сигнатур (задел под multiple sources)
+const SIGNATURE_SOURCES = [
+  {
+    id: 'primary',
+    url: 'https://raw.githubusercontent.com/avmiloserdov/cookie-banner-slasher/main/extension/rules/signatures.json',
+    priority: 1
+  }
+  // Можно добавить дополнительные источники:
+  // {
+  //   id: 'consent-o-matic',
+  //   url: 'https://....',
+  //   priority: 2,
+  //   transform: (data) => { /* convert to our format */ }
+  // }
+];
+
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 часа
+const STORAGE_KEY_SIGNATURES = 'cachedSignatures';
+const STORAGE_KEY_TIMESTAMP = 'signaturesTimestamp';
+const STORAGE_KEY_VERSION = 'signaturesVersion';
+
+// Загрузка signatures с автообновлением из GitHub
 async function loadSignatures() {
+  try {
+    // Шаг 1: Проверяем кэш в chrome.storage
+    const cached = await getCachedSignatures();
+    if (cached && isCacheValid(cached.timestamp)) {
+      console.log(`Ghost Rejector: Используем кэшированные сигнатуры (${cached.signatures.length} шт, версия: ${cached.version})`);
+      return {
+        signatures: cached.signatures,
+        source: 'cache',
+        version: cached.version || 'unknown'
+      };
+    }
+
+    // Шаг 2: Загружаем из GitHub (primary source)
+    console.log('Ghost Rejector: Загружаем свежие сигнатуры из GitHub...');
+    const githubResult = await fetchSignaturesFromGitHub();
+    if (githubResult) {
+      // Кэшируем на будущее
+      await cacheSignatures(githubResult.signatures, githubResult.version);
+      return githubResult;
+    }
+
+    // Шаг 3: Fallback на локальный файл
+    console.warn('Ghost Rejector: GitHub недоступен, пытаемся загрузить локальный файл');
+    const localResult = await fetchSignaturesFromLocal();
+    if (localResult) {
+      return localResult;
+    }
+
+    // Шаг 4: Последний fallback - встроенные сигнатуры
+    throw new Error('Все источники недоступны');
+
+  } catch (error) {
+    console.warn('Ghost Rejector: ⚠️ Используем встроенные сигнатуры:', error.message);
+    return {
+      signatures: getBuiltInSignatures(),
+      source: 'builtin',
+      version: '2025-01-01'
+    };
+  }
+}
+
+// Получение кэшированных сигнатур из chrome.storage
+async function getCachedSignatures() {
+  try {
+    const result = await chrome.storage.local.get([
+      STORAGE_KEY_SIGNATURES,
+      STORAGE_KEY_TIMESTAMP,
+      STORAGE_KEY_VERSION
+    ]);
+
+    if (result[STORAGE_KEY_SIGNATURES] && result[STORAGE_KEY_TIMESTAMP]) {
+      return {
+        signatures: result[STORAGE_KEY_SIGNATURES],
+        timestamp: result[STORAGE_KEY_TIMESTAMP],
+        version: result[STORAGE_KEY_VERSION]
+      };
+    }
+    return null;
+  } catch (error) {
+    console.warn('Ghost Rejector: Ошибка чтения кэша:', error);
+    return null;
+  }
+}
+
+// Проверка валидности кэша (< 24 часов)
+function isCacheValid(timestamp) {
+  if (!timestamp) return false;
+  const age = Date.now() - timestamp;
+  return age < CACHE_DURATION;
+}
+
+// Загрузка сигнатур из GitHub
+async function fetchSignaturesFromGitHub() {
+  try {
+    const source = SIGNATURE_SOURCES[0]; // Primary source
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5 секунд таймаут
+
+    const response = await fetch(source.url, {
+      signal: controller.signal,
+      cache: 'no-cache'
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Валидация
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error('Невалидный формат данных');
+    }
+
+    console.log(`Ghost Rejector: ✓ Загружено ${data.length} сигнатур из GitHub`);
+    return {
+      signatures: data,
+      source: 'github',
+      version: new Date().toISOString().split('T')[0] // YYYY-MM-DD
+    };
+  } catch (error) {
+    console.warn('Ghost Rejector: Не удалось загрузить из GitHub:', error.message);
+    return null;
+  }
+}
+
+// Загрузка сигнатур из локального файла (fallback)
+async function fetchSignaturesFromLocal() {
   try {
     const url = chrome.runtime.getURL('rules/signatures.json');
     const response = await fetch(url);
@@ -97,25 +231,38 @@ async function loadSignatures() {
     }
     const data = await response.json();
 
-    // Валидация что получили массив с сигнатурами
     if (!Array.isArray(data) || data.length === 0) {
-      throw new Error('Невалидный формат signatures.json');
+      throw new Error('Невалидный формат');
     }
 
     return {
       signatures: data,
-      source: 'file',
-      version: 'latest'
+      source: 'local-file',
+      version: 'bundled'
     };
   } catch (error) {
-    console.warn('Ghost Rejector: ⚠️ Не удалось загрузить signatures.json, используем встроенные сигнатуры:', error.message);
-    return {
-      signatures: getBuiltInSignatures(),
-      source: 'builtin',
-      version: '2025-01-01'
-    };
+    console.warn('Ghost Rejector: Не удалось загрузить локальный файл:', error.message);
+    return null;
   }
 }
+
+// Кэширование сигнатур в chrome.storage
+async function cacheSignatures(signatures, version) {
+  try {
+    await chrome.storage.local.set({
+      [STORAGE_KEY_SIGNATURES]: signatures,
+      [STORAGE_KEY_TIMESTAMP]: Date.now(),
+      [STORAGE_KEY_VERSION]: version
+    });
+    console.log(`Ghost Rejector: Сигнатуры закэшированы (версия: ${version})`);
+  } catch (error) {
+    console.warn('Ghost Rejector: Не удалось закэшировать:', error);
+  }
+}
+
+// ============================================================================
+// ВСТРОЕННЫЕ СИГНАТУРЫ (FALLBACK)
+// ============================================================================
 
 // Встроенные сигнатуры (fallback на случай проблем с загрузкой файла)
 function getBuiltInSignatures() {

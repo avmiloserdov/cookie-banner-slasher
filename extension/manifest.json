@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ghost Rejector",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Блокирует трекеры и автоматически отклоняет cookie баннеры",
   "incognito": "split",
 
